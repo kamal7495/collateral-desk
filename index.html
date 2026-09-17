@@ -383,6 +383,7 @@ function loadState(){
   if(!raw.quiz) raw.quiz = {sessions:[], correct:0, total:0};
   if(!raw.quiz.calib) raw.quiz.calib = {confRight:0, confWrong:0, unsureRight:0, unsureWrong:0};
   if(!raw.drills) raw.drills = {sessions:[], correct:0, total:0};
+  if(!raw.cases) raw.cases = {sessions:[], correct:0, total:0};
   if(!raw.theme) raw.theme = "system";
   return raw;
 }
@@ -494,6 +495,13 @@ function recordDrillSession(correct, total){
 function recordQuizSession(correct, total){
   STATE.quiz.sessions.push({date:Date.now(), correct, total});
   if(STATE.quiz.sessions.length > 100) STATE.quiz.sessions.shift();
+  saveState();
+}
+function recordCaseSession(correct, total){
+  STATE.cases.sessions.push({date:Date.now(), correct, total});
+  STATE.cases.correct += correct;
+  STATE.cases.total += total;
+  if(STATE.cases.sessions.length > 100) STATE.cases.sessions.shift();
   saveState();
 }
 
@@ -993,6 +1001,52 @@ function viewLifecyclePlayer(){
   </div>`;
 }
 
+/* ---------- Case studies (practice) ---------- */
+const CASES = [
+  {
+    id: "repo_case1",
+    instrument: "repo",
+    title: "Firm A's Classic Repo — Day by Day",
+    chapter_ref: 5,
+    intro: "This walks the book's own worked example: Firm A borrows USD 30,320,428.12 from Party G against USD 30,000,000 nominal of Issuer ABC 4.35% bonds (maturity Aug 1 2030), under a GMRA with a 2.5% haircut and a USD 150,000 minimum transfer amount (MTA), at a 2.42% repo rate. You'll make the same daily monitoring calls a collateral manager makes.",
+    steps: [
+      {
+        situation: "Evening of Thursday 8th June 2017. The bond's clean price closes at 99.32%. With 308 accrued days and the 2.5% haircut applied, the current collateral value works out to USD 30,139,687.50. The cash side (original amount borrowed plus 1 day's repo interest) is now worth USD 30,322,466.33. Which party is exposed, and by roughly how much?",
+        choices: [
+          {text:"Party G is exposed by about USD 182,778.83 — the collateral is worth less than the cash lent", correct:true, feedback:"Correct. Collateral value (USD 30,139,687.50) sits below the cash value (USD 30,322,466.33), so Party G — the cash lender — is under-secured by the difference."},
+          {text:"Firm A is exposed by about USD 182,778.83 — the collateral is worth more than the cash borrowed", correct:false, feedback:"It's the other way round here: collateral value is BELOW cash value, so Party G (the cash lender) is under-secured, not Firm A."},
+          {text:"Neither party is exposed — the gap is within normal day-to-day noise", correct:false, feedback:"A gross exposure of USD 182,778.83 is real money at risk, and as the next step shows, it clears the agreed minimum transfer amount."}
+        ]
+      },
+      {
+        situation: "The Minimum Transfer Amount (MTA) agreed in the GMRA's Annex 1 is USD 150,000.00. Party G's gross exposure just came out to USD 182,778.83. Is a valid margin call triggered?",
+        choices: [
+          {text:"Yes — the exposure exceeds the MTA, so Party G can validly call", correct:true, feedback:"Correct — USD 182,778.83 is greater than the USD 150,000.00 MTA, so the call is valid."},
+          {text:"No — margin calls under a GMRA can only be made weekly, not daily", correct:false, feedback:"There's no such weekly-only rule — exposure is typically assessed daily; the real gate here is the MTA threshold, which this exposure clears."},
+          {text:"No — the MTA on this trade is actually USD 200,000, so this falls short", correct:false, feedback:"The MTA agreed on this trade is USD 150,000.00, not USD 200,000 — and USD 182,778.83 clears it either way."}
+        ]
+      },
+      {
+        situation: "Party G issues the margin call. Firm A checks the calculation, agrees with it, and must now decide how to satisfy it — Firm A chooses to settle in cash rather than deliver more bonds. What does Firm A do next?",
+        choices: [
+          {text:"Communicate the choice of cash, then issue a cash settlement instruction to its cash correspondent by that correspondent's deadline", correct:true, feedback:"Correct — exactly the book's sequence: decide the settlement form, communicate it so the counterparty can confirm it's acceptable under the legal docs, then instruct the cash correspondent to pay."},
+          {text:"Deliver additional bonds via the CSD, since a collateral shortfall must always be met with the same asset class as the original collateral", correct:false, feedback:"There's no same-asset-class rule here — the book has Firm A choose cash instead, and Party G simply verifies cash is an acceptable form under the legal documentation."},
+          {text:"Net the shortfall into the repurchase price and settle it at the closing leg instead", correct:false, feedback:"Margin calls are settled promptly during the life of the trade, not deferred to the closing leg — deferring would leave Party G under-secured in the meantime, defeating the point of daily margining."}
+        ]
+      },
+      {
+        situation: "Morning of Monday 12th June. After the weekend's price move (bond now at 99.71%) and Friday's cash margin payment, the running numbers now show Firm A with a gross exposure of USD 118,563.50. The MTA is still USD 150,000.00. What should happen?",
+        choices: [
+          {text:"No valid call — the exposure is real but sits below the MTA, so Firm A just confirms with Party G that no call applies today", correct:true, feedback:"Correct — this is the book's own point: an exposure can genuinely exist without ever crossing the MTA. Firm A doesn't manufacture a call it isn't entitled to make."},
+          {text:"Firm A issues a margin call on Party G for USD 118,563.50", correct:false, feedback:"USD 118,563.50 is below the USD 150,000.00 MTA, so a call for this amount would not be valid under the agreed terms."},
+          {text:"The USD 118,563.50 automatically carries over and is added on top of tomorrow's exposure calculation", correct:false, feedback:"Each day's exposure is freshly calculated from that day's market price and the running cash/collateral balances — it isn't manually accumulated as a separate carried-forward total."}
+        ]
+      }
+    ]
+  }
+];
+let CASE_SESSION = null;
+
 /* ---------- Quiz ---------- */
 let QUIZ_SESSION = null;
 let QUIZ_FILTER = PART_GROUPS.map(g=>g.key);
@@ -1016,8 +1070,70 @@ function viewQuiz(){
   <div class="lc-tabs">
     <button class="lc-tab ${QUIZ_MODE==="quiz"?"is-active":""}" data-quiz-mode="quiz">Scenario Quiz</button>
     <button class="lc-tab ${QUIZ_MODE==="drill"?"is-active":""}" data-quiz-mode="drill">Calc Drills</button>
+    <button class="lc-tab ${QUIZ_MODE==="case"?"is-active":""}" data-quiz-mode="case">Practice</button>
   </div>`;
-  return tabsHtml + (QUIZ_MODE === "drill" ? viewDrill() : viewQuizScenario());
+  const body = QUIZ_MODE === "drill" ? viewDrill() : QUIZ_MODE === "case" ? viewCase() : viewQuizScenario();
+  return tabsHtml + body;
+}
+
+function viewCase(){
+  if(!CASE_SESSION){
+    const cards = CASES.map(c=>`
+      <div class="card" style="margin-bottom:10px;">
+        <span class="stamp" style="background:var(--cat-${c.instrument}-soft);color:var(--cat-${c.instrument});">${escapeHtml(CATS[c.instrument]||c.instrument)}</span>
+        <h3 style="font-size:16.5px;margin-top:10px;">${escapeHtml(c.title)}</h3>
+        <p class="muted" style="margin-top:8px;font-size:13.5px;">${escapeHtml(c.intro)}</p>
+        <button class="hero-btn" style="margin-top:16px;" data-start-case="${c.id}">Start practice →</button>
+      </div>`).join("");
+    return `
+    <div class="stack">
+      <div class="eyebrow">Work a real case, step by step</div>
+      <p class="muted" style="font-size:13px;">Each case walks a genuine worked scenario from the book. You make the same calls a collateral manager would — who's exposed, whether a call is valid, how to settle it.</p>
+      ${cards}
+    </div>`;
+  }
+
+  const c = CASES.find(x=>x.id===CASE_SESSION.caseId);
+  if(CASE_SESSION.idx >= c.steps.length){
+    const s = CASE_SESSION;
+    CASE_SESSION = null;
+    recordCaseSession(s.correct, s.total);
+    return `
+    <div class="flash session-summary">
+      <div class="eyebrow">Case complete</div>
+      <div class="summary-num" style="margin-top:10px;">${s.correct}/${s.total}</div>
+      <p class="muted summary-sub">decisions correct — "${escapeHtml(c.title)}"</p>
+      <button class="hero-btn" style="max-width:260px;margin:20px auto 0;" id="btn-case-restart">Back to practice →</button>
+    </div>`;
+  }
+
+  const step = c.steps[CASE_SESSION.idx];
+  const dotsHtml = c.steps.map((_,i)=>`<span class="pdot ${i<CASE_SESSION.idx?'done':(i===CASE_SESSION.idx?'current':'')}"></span>`).join("");
+
+  let body;
+  if(!CASE_SESSION.answered){
+    const opts = step.choices.map((ch,i)=>`<button class="quiz-opt" data-case-choice="${i}">${escapeHtml(ch.text)}</button>`).join("");
+    body = `<div class="quiz-q">${escapeHtml(step.situation)}</div><div class="quiz-opts">${opts}</div>`;
+  } else {
+    const opts = step.choices.map((ch,i)=>{
+      let cls="";
+      if(ch.correct) cls="is-correct";
+      else if(i===CASE_SESSION.selected) cls="is-wrong";
+      return `<button class="quiz-opt ${cls}" disabled>${escapeHtml(ch.text)}</button>`;
+    }).join("");
+    const chosen = step.choices[CASE_SESSION.selected];
+    const nextLabel = CASE_SESSION.idx+1>=c.steps.length ? 'See results →' : 'Next →';
+    body = `<div class="quiz-q">${escapeHtml(step.situation)}</div><div class="quiz-opts">${opts}</div>
+      <div class="quiz-explain">${escapeHtml(chosen.feedback)}</div>
+      <button class="hero-btn quiz-next" id="case-next">${nextLabel}</button>`;
+  }
+
+  return `
+  <div class="progressline">
+    <span class="progresstext"><b>${CASE_SESSION.idx+1}</b> / ${c.steps.length}</span>
+    <div class="dots">${dotsHtml}</div>
+  </div>
+  <div class="flash" style="text-align:left;">${body}</div>`;
 }
 
 function viewQuizScenario(){
@@ -1295,6 +1411,12 @@ function viewStats(){
       <div class="stattile"><b>${quizAcc===null?'—':quizAcc+'%'}</b><span>Quiz accuracy</span></div>
       <div class="stattile"><b>${STATE.quiz.total}</b><span>Quiz answers</span></div>
     </div>
+
+    ${STATE.cases.total>0 ? `
+    <div class="statgrid">
+      <div class="stattile"><b>${Math.round((STATE.cases.correct/STATE.cases.total)*100)}%</b><span>Practice accuracy</span></div>
+      <div class="stattile"><b>${STATE.cases.sessions.length}</b><span>Cases completed</span></div>
+    </div>` : ''}
 
     ${calibTotal>0 ? `
     <div class="card">
@@ -1712,6 +1834,38 @@ document.addEventListener("click",(e)=>{
 
   const quizModeBtn = e.target.closest("[data-quiz-mode]");
   if(quizModeBtn){ QUIZ_MODE = quizModeBtn.dataset.quizMode; render(); return; }
+
+  const startCase = e.target.closest("[data-start-case]");
+  if(startCase){
+    CASE_SESSION = { caseId: startCase.dataset.startCase, idx:0, answered:false, selected:null, correct:0, total:0 };
+    render();
+    return;
+  }
+
+  const caseChoice = e.target.closest(".quiz-opt[data-case-choice]");
+  if(caseChoice && CASE_SESSION && !CASE_SESSION.answered){
+    const idx = parseInt(caseChoice.dataset.caseChoice,10);
+    const c = CASES.find(x=>x.id===CASE_SESSION.caseId);
+    const step = c.steps[CASE_SESSION.idx];
+    CASE_SESSION.selected = idx;
+    CASE_SESSION.answered = true;
+    CASE_SESSION.total += 1;
+    if(step.choices[idx].correct) CASE_SESSION.correct += 1;
+    render();
+    return;
+  }
+
+  const caseNext = e.target.closest("#case-next");
+  if(caseNext && CASE_SESSION){
+    CASE_SESSION.idx += 1;
+    CASE_SESSION.answered = false;
+    CASE_SESSION.selected = null;
+    render();
+    return;
+  }
+
+  const caseRestart = e.target.closest("#btn-case-restart");
+  if(caseRestart){ CASE_SESSION = null; render(); return; }
 
   const drillStart = e.target.closest("#btn-drill-start, #btn-drill-restart");
   if(drillStart){ startDrill(); return; }
